@@ -26,12 +26,12 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
+		defer conn.Close()
 		handleConnection(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
-	defer conn.Close()
 	buf := make([]byte, 1024)
 	n, err := conn.Read(buf)
 	if err != nil {
