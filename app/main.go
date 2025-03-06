@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 )
@@ -11,7 +12,6 @@ var _ = net.Listen
 var _ = os.Exit
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Starting TCP server on port 6379")
 
 	l, err := net.Listen("tcp", "0.0.0.0:6379")
@@ -20,31 +20,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
 	for {
+		conn, err := l.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
 
-		handleConnection(conn)
+		go handleConnection(conn)
 	}
 }
 
 func handleConnection(conn net.Conn) {
 	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	if err != nil {
-		fmt.Println("Error reading from connection: ", err.Error())
-		return
+
+	for {
+		n, err := conn.Read(buf)
+		if err == io.EOF {
+			conn.Close()
+			fmt.Println("EOF detected. Connection closed")
+			return
+		}
+
+		if err != nil {
+			fmt.Println("Error reading from connection: ", err.Error())
+			return
+		}
+		fmt.Println("Received", n, "bytes")
+		fmt.Println("Received: ", string(buf[:n]))
+		n, err = conn.Write([]byte("+PONG\r\n"))
+		if err != nil {
+			fmt.Println("Error writing to connection: ", err.Error())
+			return
+		}
+		fmt.Printf("Sent %d bytes\n", 6)
+		fmt.Printf("Sent: +PONG\r\n")
 	}
-	fmt.Println("Received", n, "bytes")
-	fmt.Println("Received: ", string(buf[:n]))
-	n, err = conn.Write([]byte("+PONG\r\n"))
-	if err != nil {
-		fmt.Println("Error writing to connection: ", err.Error())
-		return
-	}
-	fmt.Printf("Sent %d bytes\n", 6)
-	fmt.Printf("Sent: +PONG\r\n")
 }
