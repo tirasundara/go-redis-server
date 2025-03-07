@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,12 @@ import (
 var _ = net.Listen
 var _ = os.Exit
 
+// Config struct to store parsed arguments
+type Config struct {
+	Dir        string
+	DbFileName string
+}
+
 type Entry struct {
 	Value      string
 	ExpiryTime time.Time // Zero value means no expiration
@@ -24,7 +31,13 @@ type Entry struct {
 // TODO: add mutex later
 var store = make(map[string]Entry)
 
+var config Config
+
 func main() {
+	// Load app configuration
+	config = loadConfig()
+
+	// Start the server
 	listener, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -33,7 +46,6 @@ func main() {
 	defer listener.Close()
 
 	fmt.Println("Redis server running on port 6379...")
-
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -42,6 +54,21 @@ func main() {
 		}
 
 		go handleConnection(conn)
+	}
+}
+
+func loadConfig() Config {
+	// Define flags with default value
+	dir := flag.String("dir", "/var/lib/redis", "Directory to store database files")
+	dbFilename := flag.String("dbfilename", "dump.rdb", "Database filename")
+
+	// Parse the command-line arguments
+	flag.Parse()
+
+	// Store values in Config struct
+	return Config{
+		Dir:        *dir,
+		DbFileName: *dbFilename,
 	}
 }
 
@@ -139,6 +166,18 @@ func executeCommand(commands []string) string {
 		}
 		return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.Value), entry.Value)
 
+	case "CONFIG":
+		n := len(commands)
+		if n != 3 {
+			return "-ERR wrong number of arguments for 'CONFIG'\r\n"
+		}
+
+		if strings.ToUpper(commands[1]) != "GET" {
+			return fmt.Sprintf("-ERR Unknown CONFIG command: %s \r\n", commands[1])
+		}
+
+		return handleConfigGet(commands[2])
+
 	default:
 		return "+PONG\r\n" // TODO: may change later
 	}
@@ -170,4 +209,31 @@ func handleConnection(conn net.Conn) {
 		}
 		fmt.Printf("Sent: %s\n", response)
 	}
+}
+
+func handleConfigGet(key string) string {
+	var response string
+	if key == "*" { // Return all config values
+		var configMap = map[string]string{
+			"dir":        config.Dir,
+			"dbFilename": config.DbFileName,
+		}
+		response = fmt.Sprintf("*%d\r\n", len(configMap)*2)
+		for k, v := range configMap {
+			response += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(k), k, len(v), v)
+		}
+	} else {
+		var value string
+		switch key {
+		case "dir":
+			value = config.Dir
+		case "dbfilename":
+			value = config.DbFileName
+		default:
+			return "$-1\r\n" // RESP Null Bulk String (key not found)
+		}
+		response = fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
+	}
+
+	return response
 }
