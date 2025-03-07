@@ -223,13 +223,7 @@ func executeCommand(commands []string) string {
 		return response
 
 	case "INFO":
-		info := "# Replication\nrole:"
-		role := "master"
-		if config.ReplicaOf != "" {
-			role = "slave"
-		}
-		info += role
-		return fmt.Sprintf("$%d\r\n%s\r\n", len(info), info)
+		return handleInfo("")
 	default:
 		return "+PONG\r\n" // TODO: may change later
 	}
@@ -285,4 +279,9 @@ func handleConfigGet(key string) string {
 	response = fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
 
 	return response
+}
+
+func handleInfo(_ string) string {
+	info := config.GetReplicationInfo()
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(info), info)
 }
