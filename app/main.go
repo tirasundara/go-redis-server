@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -61,23 +60,6 @@ func main() {
 		}
 
 		go handleConnection(conn)
-	}
-}
-
-func loadConfig() *Config {
-	// Define flags with default value
-	dir := flag.String("dir", "/var/lib/redis", "Directory to store database files")
-	dbFilename := flag.String("dbfilename", "dump.rdb", "Database filename")
-	port := flag.Uint("port", 6379, "Server port number")
-
-	// Parse the command-line arguments
-	flag.Parse()
-
-	// Store values in Config struct
-	return &Config{
-		Dir:        *dir,
-		DbFileName: *dbFilename,
-		Port:       *port,
 	}
 }
 
@@ -241,7 +223,12 @@ func executeCommand(commands []string) string {
 		return response
 
 	case "INFO":
-		info := "# Replication\nrole:master"
+		info := "# Replication\nrole:"
+		role := "master"
+		if config.ReplicaOf != "" {
+			role = "slave"
+		}
+		info += role
 		return fmt.Sprintf("$%d\r\n%s\r\n", len(info), info)
 	default:
 		return "+PONG\r\n" // TODO: may change later
