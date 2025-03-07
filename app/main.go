@@ -14,6 +14,10 @@ import (
 var _ = net.Listen
 var _ = os.Exit
 
+// In-memory key-value store
+// TODO: add mutex later
+var store = make(map[string]string)
+
 func main() {
 	listener, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
@@ -90,6 +94,24 @@ func executeCommand(commands []string) string {
 			return "-ERR wrong number of arguments\r\n"
 		}
 		return fmt.Sprintf("$%d\r\n%s\r\n", len(commands[1]), commands[1])
+
+	case "SET":
+		if len(commands) < 3 {
+			return "-ERR wrong number of arguments for 'SET'\r\n"
+		}
+		// TODO: implement lock & unlock
+		store[commands[1]] = commands[2]
+		return "+OK\r\n"
+
+	case "GET":
+		if len(commands) < 2 {
+			return "-ERR wrong number of arguments for 'GET'\r\n"
+		}
+		val, found := store[commands[1]]
+		if !found {
+			return "$-1\r\n" // Null response if key doesn't exist
+		}
+		return fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
 
 	default:
 		return "+PONG\r\n" // TODO: may change later
