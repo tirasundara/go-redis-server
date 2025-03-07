@@ -4,6 +4,7 @@ package main
 type Config struct {
 	Dir        string
 	DbFileName string
+	Port       uint
 }
 
 func (c *Config) DbFilePath() string {

@@ -45,14 +45,14 @@ func main() {
 	}
 
 	// Start the server
-	listener, err := net.Listen("tcp", "0.0.0.0:6379")
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", config.Port))
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
 	defer listener.Close()
 
-	fmt.Println("Redis server running on port 6379...")
+	fmt.Printf("Redis server running on port %d...\n", config.Port)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -68,6 +68,7 @@ func loadConfig() *Config {
 	// Define flags with default value
 	dir := flag.String("dir", "/var/lib/redis", "Directory to store database files")
 	dbFilename := flag.String("dbfilename", "dump.rdb", "Database filename")
+	port := flag.Uint("port", 6379, "Server port number")
 
 	// Parse the command-line arguments
 	flag.Parse()
@@ -76,6 +77,7 @@ func loadConfig() *Config {
 	return &Config{
 		Dir:        *dir,
 		DbFileName: *dbFilename,
+		Port:       *port,
 	}
 }
 
@@ -233,7 +235,7 @@ func executeCommand(commands []string) string {
 
 		var response string
 		response = fmt.Sprintf("*%d\r\n", len(store))
-		for k, _ := range store {
+		for k := range store {
 			response += fmt.Sprintf("$%d\r\n%s\r\n", len(k), k)
 		}
 		return response
@@ -277,6 +279,7 @@ func handleConfigGet(key string) string {
 		var configMap = map[string]string{
 			"dir":        config.Dir,
 			"dbFilename": config.DbFileName,
+			"port":       fmt.Sprintf("%d", config.Port),
 		}
 		response = fmt.Sprintf("*%d\r\n", len(configMap)*2)
 		for k, v := range configMap {
@@ -289,6 +292,8 @@ func handleConfigGet(key string) string {
 			value = config.Dir
 		case "dbfilename":
 			value = config.DbFileName
+		case "port":
+			value = fmt.Sprintf("%d", config.Port)
 		default:
 			return "$-1\r\n" // RESP Null Bulk String (key not found)
 		}
