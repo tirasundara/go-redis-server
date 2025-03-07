@@ -240,6 +240,9 @@ func executeCommand(commands []string) string {
 		}
 		return response
 
+	case "INFO":
+		info := "# Replication\nrole:master"
+		return fmt.Sprintf("$%d\r\n%s\r\n", len(info), info)
 	default:
 		return "+PONG\r\n" // TODO: may change later
 	}
@@ -275,30 +278,24 @@ func handleConnection(conn net.Conn) {
 
 func handleConfigGet(key string) string {
 	var response string
+	var configMap = map[string]string{
+		"dir":        config.Dir,
+		"dbFilename": config.DbFileName,
+		"port":       fmt.Sprintf("%d", config.Port),
+	}
 	if key == "*" { // Return all config values
-		var configMap = map[string]string{
-			"dir":        config.Dir,
-			"dbFilename": config.DbFileName,
-			"port":       fmt.Sprintf("%d", config.Port),
-		}
 		response = fmt.Sprintf("*%d\r\n", len(configMap)*2)
 		for k, v := range configMap {
 			response += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(k), k, len(v), v)
 		}
-	} else {
-		var value string
-		switch key {
-		case "dir":
-			value = config.Dir
-		case "dbfilename":
-			value = config.DbFileName
-		case "port":
-			value = fmt.Sprintf("%d", config.Port)
-		default:
-			return "$-1\r\n" // RESP Null Bulk String (key not found)
-		}
-		response = fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
+		return response
 	}
+
+	value, found := configMap[key]
+	if !found {
+		return "$-1\r\n" // RESP Null Bulk String (key not found)
+	}
+	response = fmt.Sprintf("*2\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n", len(key), key, len(value), value)
 
 	return response
 }
