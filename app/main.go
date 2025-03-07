@@ -8,15 +8,21 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
 var _ = net.Listen
 var _ = os.Exit
 
+type Entry struct {
+	Value      string
+	ExpiryTime time.Time // Zero value means no expiration
+}
+
 // In-memory key-value store
 // TODO: add mutex later
-var store = make(map[string]string)
+var store = make(map[string]Entry)
 
 func main() {
 	listener, err := net.Listen("tcp", "0.0.0.0:6379")
@@ -99,19 +105,39 @@ func executeCommand(commands []string) string {
 		if len(commands) < 3 {
 			return "-ERR wrong number of arguments for 'SET'\r\n"
 		}
+
+		var expiry time.Time
+		key := commands[1]
+		value := commands[2]
+		if len(commands) == 5 && strings.ToUpper(commands[3]) == "PX" {
+			ms, err := strconv.Atoi(commands[4])
+			if err != nil {
+				return "-ERR invalid expiry duration value\r\n"
+			}
+			expiry = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		}
 		// TODO: implement lock & unlock
-		store[commands[1]] = commands[2]
+		entry := Entry{Value: value, ExpiryTime: expiry}
+		store[key] = entry
+
 		return "+OK\r\n"
 
 	case "GET":
 		if len(commands) < 2 {
 			return "-ERR wrong number of arguments for 'GET'\r\n"
 		}
-		val, found := store[commands[1]]
+
+		key := commands[1]
+		entry, found := store[key]
 		if !found {
 			return "$-1\r\n" // Null response if key doesn't exist
 		}
-		return fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
+
+		if !entry.ExpiryTime.IsZero() && time.Now().After(entry.ExpiryTime) {
+			delete(store, key) // Delete expired key-value
+			return "$-1\r\n"
+		}
+		return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.Value), entry.Value)
 
 	default:
 		return "+PONG\r\n" // TODO: may change later
