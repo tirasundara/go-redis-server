@@ -10,32 +10,39 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hdt3213/rdb/model"
+	"github.com/hdt3213/rdb/parser"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
 var _ = net.Listen
 var _ = os.Exit
 
-// Config struct to store parsed arguments
-type Config struct {
-	Dir        string
-	DbFileName string
-}
-
 type Entry struct {
 	Value      string
-	ExpiryTime time.Time // Zero value means no expiration
+	ExpiryTime *time.Time
 }
 
 // In-memory key-value store
 // TODO: add mutex later
 var store = make(map[string]Entry)
 
-var config Config
+var config *Config
 
 func main() {
 	// Load app configuration
 	config = loadConfig()
+
+	// Load entries from RDB file (if exists)
+	err := loadRDB(config.DbFilePath())
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Println("Failed to load RDB:", err)
+			os.Exit(1)
+		}
+		fmt.Println("File does not exist. Start from fresh instead")
+	}
 
 	// Start the server
 	listener, err := net.Listen("tcp", "0.0.0.0:6379")
@@ -57,7 +64,7 @@ func main() {
 	}
 }
 
-func loadConfig() Config {
+func loadConfig() *Config {
 	// Define flags with default value
 	dir := flag.String("dir", "/var/lib/redis", "Directory to store database files")
 	dbFilename := flag.String("dbfilename", "dump.rdb", "Database filename")
@@ -66,10 +73,46 @@ func loadConfig() Config {
 	flag.Parse()
 
 	// Store values in Config struct
-	return Config{
+	return &Config{
 		Dir:        *dir,
 		DbFileName: *dbFilename,
 	}
+}
+
+func loadRDB(filename string) error {
+	// writeRDB()
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := parser.NewDecoder(file)
+
+	// Parse RDB file and process entries
+	err = decoder.Parse(func(object model.RedisObject) bool {
+		key := object.GetKey()
+		expiry := object.GetExpiration()
+
+		switch value := object.(type) {
+		case *model.StringObject:
+			entry := Entry{Value: string(value.Value)}
+			if expiry != nil {
+				entry.ExpiryTime = expiry
+			}
+			store[key] = entry
+		default:
+			fmt.Printf("Unknown type for key: %s\n", key)
+		}
+
+		return true // continue parsing
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to parse RDB: %w", err)
+	}
+
+	return nil
 }
 
 // parseRESP reads the incoming data from the client and parses it into a RESP array.
@@ -133,18 +176,19 @@ func executeCommand(commands []string) string {
 			return "-ERR wrong number of arguments for 'SET'\r\n"
 		}
 
-		var expiry time.Time
 		key := commands[1]
 		value := commands[2]
+		entry := Entry{Value: value}
 		if len(commands) == 5 && strings.ToUpper(commands[3]) == "PX" {
 			ms, err := strconv.Atoi(commands[4])
 			if err != nil {
 				return "-ERR invalid expiry duration value\r\n"
 			}
-			expiry = time.Now().Add(time.Duration(ms) * time.Millisecond)
+			expiry := time.Now().Add(time.Duration(ms) * time.Millisecond)
+			entry.ExpiryTime = &expiry
 		}
+
 		// TODO: implement lock & unlock
-		entry := Entry{Value: value, ExpiryTime: expiry}
 		store[key] = entry
 
 		return "+OK\r\n"
@@ -160,7 +204,7 @@ func executeCommand(commands []string) string {
 			return "$-1\r\n" // Null response if key doesn't exist
 		}
 
-		if !entry.ExpiryTime.IsZero() && time.Now().After(entry.ExpiryTime) {
+		if entry.ExpiryTime != nil && time.Now().After(*entry.ExpiryTime) {
 			delete(store, key) // Delete expired key-value
 			return "$-1\r\n"
 		}
@@ -177,6 +221,22 @@ func executeCommand(commands []string) string {
 		}
 
 		return handleConfigGet(commands[2])
+
+	case "KEYS":
+		if len(commands) < 2 {
+			return "-ERR wrong number of arguments for 'KEYS'\r\n"
+		}
+
+		if commands[1] != "*" {
+			return "-ERR invalid argument for 'KEYS'\r\n"
+		}
+
+		var response string
+		response = fmt.Sprintf("*%d\r\n", len(store))
+		for k, _ := range store {
+			response += fmt.Sprintf("$%d\r\n%s\r\n", len(k), k)
+		}
+		return response
 
 	default:
 		return "+PONG\r\n" // TODO: may change later
