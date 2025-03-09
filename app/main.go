@@ -91,6 +91,8 @@ func sendHandsake(config *Config) (net.Conn, error) {
 	conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"))
 	time.Sleep(50 * time.Millisecond)
 	conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
+	time.Sleep(50 * time.Millisecond)
+	conn.Write([]byte("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
 
 	return conn, nil
 
@@ -257,6 +259,12 @@ func executeCommand(commands []string) string {
 
 	case "INFO":
 		return handleInfo("")
+
+	case "PSYNC":
+		if len(commands) < 3 {
+			return "-ERR wrong number of arguments of 'PSYNC'\r\n"
+		}
+		return "+FULLRESYNC <REPL_ID> 0\r\n"
 	default:
 		return "+OK\r\n" // TODO: may change later
 	}
