@@ -35,10 +35,12 @@ func main() {
 
 	// Handshake with master, if it's replica
 	if config.ReplicationConfig.role != "master" {
-		if err := sendHandsake(config); err != nil {
+		dialConn, err := sendHandsake(config)
+		if err != nil {
 			fmt.Println("send handsake to master error: %w", err)
 			os.Exit(1)
 		}
+		defer dialConn.Close()
 	}
 
 	// Load entries from RDB file (if exists)
@@ -71,22 +73,26 @@ func main() {
 	}
 }
 
-func sendHandsake(config *Config) error {
+func sendHandsake(config *Config) (net.Conn, error) {
 	fields := strings.Fields(config.ReplicationConfig.replicaOf)
 	if len(fields) < 2 {
-		return fmt.Errorf("invalid --replicaof value")
+		return nil, fmt.Errorf("invalid --replicaof value")
 	}
 
 	masterHost, masterPort := fields[0], fields[1]
 	addr := fmt.Sprintf("%s:%s", masterHost, masterPort)
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	conn.Write([]byte("*1\r\n$4\r\nping\r\n"))
+	time.Sleep(50 * time.Millisecond)
+	conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"))
+	time.Sleep(50 * time.Millisecond)
+	conn.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
 
-	return nil
+	return conn, nil
 
 }
 
@@ -252,7 +258,7 @@ func executeCommand(commands []string) string {
 	case "INFO":
 		return handleInfo("")
 	default:
-		return "+PONG\r\n" // TODO: may change later
+		return "+OK\r\n" // TODO: may change later
 	}
 }
 
