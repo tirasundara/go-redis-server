@@ -33,6 +33,14 @@ func main() {
 	// Load app configuration
 	config = loadConfig()
 
+	// Handshake with master, if it's replica
+	if config.ReplicationConfig.role != "master" {
+		if err := sendHandsake(config); err != nil {
+			fmt.Println("send handsake to master error: %w", err)
+			os.Exit(1)
+		}
+	}
+
 	// Load entries from RDB file (if exists)
 	err := loadRDB(config.DbFilePath())
 	if err != nil {
@@ -61,6 +69,25 @@ func main() {
 
 		go handleConnection(conn)
 	}
+}
+
+func sendHandsake(config *Config) error {
+	fields := strings.Fields(config.ReplicationConfig.replicaOf)
+	if len(fields) < 2 {
+		return fmt.Errorf("invalid --replicaof value")
+	}
+
+	masterHost, masterPort := fields[0], fields[1]
+	addr := fmt.Sprintf("%s:%s", masterHost, masterPort)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	conn.Write([]byte("*1\r\n$4\r\nping\r\n"))
+
+	return nil
+
 }
 
 func loadRDB(filename string) error {
