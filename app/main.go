@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/storage/memory"
 	"github.com/hdt3213/rdb/model"
 	"github.com/hdt3213/rdb/parser"
 )
@@ -18,14 +19,8 @@ import (
 var _ = net.Listen
 var _ = os.Exit
 
-type Entry struct {
-	Value      string
-	ExpiryTime *time.Time
-}
-
 // In-memory key-value store
-// TODO: add mutex later
-var store = make(map[string]Entry)
+var store = memory.NewStore()
 
 var config *Config
 
@@ -115,11 +110,16 @@ func loadRDB(filename string) error {
 
 		switch value := object.(type) {
 		case *model.StringObject:
-			entry := Entry{Value: string(value.Value)}
+			val := string(value.Value)
 			if expiry != nil {
-				entry.ExpiryTime = expiry
+				if !time.Now().After(*expiry) { // not expired yet
+					expTimeMilli := time.Until(*expiry).Milliseconds()
+					store.SetPX(key, val, int(expTimeMilli))
+				}
+
+			} else {
+				store.Set(key, val)
 			}
-			store[key] = entry
 		default:
 			fmt.Printf("Unknown type for key: %s\n", key)
 		}
@@ -197,19 +197,17 @@ func executeCommand(commands []string) string {
 
 		key := commands[1]
 		value := commands[2]
-		entry := Entry{Value: value}
 		if len(commands) == 5 && strings.ToUpper(commands[3]) == "PX" {
 			ms, err := strconv.Atoi(commands[4])
 			if err != nil {
 				return "-ERR invalid expiry duration value\r\n"
 			}
-			expiry := time.Now().Add(time.Duration(ms) * time.Millisecond)
-			entry.ExpiryTime = &expiry
+
+			store.SetPX(key, value, ms)
+			return "+OK\r\n"
 		}
 
-		// TODO: implement lock & unlock
-		store[key] = entry
-
+		store.Set(key, value)
 		return "+OK\r\n"
 
 	case "GET":
@@ -218,16 +216,12 @@ func executeCommand(commands []string) string {
 		}
 
 		key := commands[1]
-		entry, found := store[key]
+		val, found := store.Get(key)
 		if !found {
 			return "$-1\r\n" // Null response if key doesn't exist
 		}
 
-		if entry.ExpiryTime != nil && time.Now().After(*entry.ExpiryTime) {
-			delete(store, key) // Delete expired key-value
-			return "$-1\r\n"
-		}
-		return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.Value), entry.Value)
+		return fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
 
 	case "CONFIG":
 		n := len(commands)
@@ -251,8 +245,9 @@ func executeCommand(commands []string) string {
 		}
 
 		var response string
-		response = fmt.Sprintf("*%d\r\n", len(store))
-		for k := range store {
+		keys := store.GetKeys()
+		response = fmt.Sprintf("*%d\r\n", len(keys))
+		for _, k := range keys {
 			response += fmt.Sprintf("$%d\r\n%s\r\n", len(k), k)
 		}
 		return response
