@@ -259,7 +259,9 @@ func executeCommand(commands []string) string {
 		if len(commands) < 3 {
 			return "-ERR wrong number of arguments of 'PSYNC'\r\n"
 		}
-		return "+FULLRESYNC <REPL_ID> 0\r\n"
+		return fmt.Sprintf("+FULLRESYNC %s %d\r\n", config.ReplicationConfig.masterReplId, config.ReplicationConfig.masterReplOffset)
+	case "REPLCONF":
+		return "+OK\r\n"
 	default:
 		return "+OK\r\n" // TODO: may change later
 	}
