@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 )
 
 // Config struct to store parsed arguments
@@ -35,7 +36,7 @@ func NewReplicationConfig(replicaOf, masterReplId string, masterReplOffset int) 
 }
 
 func (c *Config) DbFilePath() string {
-	return c.Dir + "/" + c.DbFileName
+	return filepath.Join(c.Dir, c.DbFileName)
 }
 
 func (c *Config) GetReplicationInfo() string {

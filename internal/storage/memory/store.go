@@ -1,8 +1,14 @@
 package memory
 
 import (
+	"fmt"
+	"os"
 	"sync"
 	"time"
+
+	"github.com/codecrafters-io/redis-starter-go/internal/storage"
+	"github.com/hdt3213/rdb/model"
+	"github.com/hdt3213/rdb/parser"
 )
 
 // Store represents an in-memory Redis-like data store
@@ -16,6 +22,9 @@ type entry struct {
 	value      string
 	expiryTime *time.Time
 }
+
+// Ensure Store implements the Storage interface
+var _ storage.Storage = (*Store)(nil)
 
 // NewStore creates a new in-memory store
 func NewStore() *Store {
@@ -73,4 +82,57 @@ func (s *Store) GetKeys() []string {
 	}
 
 	return keys
+}
+
+// Delete removes a key from the store
+func (s *Store) Delete(key string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, exists := s.data[key]
+	if !exists {
+		return false
+	}
+
+	delete(s.data, key)
+	return true
+}
+
+// LoadRDB loads data from an RDB file
+func (s *Store) LoadRDB(filename string) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := parser.NewDecoder(file)
+
+	// Parse RDB file and process entries
+	err = decoder.Parse(func(object model.RedisObject) bool {
+		key := object.GetKey()
+		expiry := object.GetExpiration()
+
+		switch value := object.(type) {
+		case *model.StringObject:
+			val := string(value.Value)
+			if expiry != nil {
+				if !time.Now().After(*expiry) { // not expired yet
+					expTimeMilli := time.Until(*expiry).Milliseconds()
+					s.SetPX(key, val, int(expTimeMilli))
+				}
+			} else {
+				s.Set(key, val)
+			}
+		default:
+			fmt.Printf("Unknown type for key: %s\n", key)
+		}
+
+		return true // continue parsing
+	})
+	if err != nil {
+		return fmt.Errorf("Failed to parse RDB: %w", err)
+	}
+
+	return nil
 }

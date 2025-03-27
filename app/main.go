@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codecrafters-io/redis-starter-go/internal/storage"
 	"github.com/codecrafters-io/redis-starter-go/internal/storage/memory"
-	"github.com/hdt3213/rdb/model"
-	"github.com/hdt3213/rdb/parser"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -28,6 +27,12 @@ func main() {
 	// Load app configuration
 	config = loadConfig()
 
+	// Load RDB file if exists
+	err := loadRDBData(store, config.DbFilePath())
+	if err != nil {
+		fmt.Printf("Warning: Failed to load RDB file: %v\n", err)
+	}
+
 	// Handshake with master, if it's replica
 	if config.ReplicationConfig.role != "master" {
 		dialConn, err := sendHandsake(config)
@@ -36,16 +41,6 @@ func main() {
 			os.Exit(1)
 		}
 		defer dialConn.Close()
-	}
-
-	// Load entries from RDB file (if exists)
-	err := loadRDB(config.DbFilePath())
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Println("Failed to load RDB:", err)
-			os.Exit(1)
-		}
-		fmt.Println("File does not exist. Start from fresh instead")
 	}
 
 	// Start the server
@@ -93,45 +88,18 @@ func sendHandsake(config *Config) (net.Conn, error) {
 
 }
 
-func loadRDB(filename string) error {
-	// writeRDB()
-	file, err := os.Open(filename)
+func loadRDBData(store storage.Storage, filename string) error {
+	fmt.Printf("Attempting to load RDB from: %s\n", filename)
+	_, err := os.Stat(filename)
 	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("RDB file does not exist. Starting with empty database...")
+			return nil
+		}
 		return err
 	}
-	defer file.Close()
 
-	decoder := parser.NewDecoder(file)
-
-	// Parse RDB file and process entries
-	err = decoder.Parse(func(object model.RedisObject) bool {
-		key := object.GetKey()
-		expiry := object.GetExpiration()
-
-		switch value := object.(type) {
-		case *model.StringObject:
-			val := string(value.Value)
-			if expiry != nil {
-				if !time.Now().After(*expiry) { // not expired yet
-					expTimeMilli := time.Until(*expiry).Milliseconds()
-					store.SetPX(key, val, int(expTimeMilli))
-				}
-
-			} else {
-				store.Set(key, val)
-			}
-		default:
-			fmt.Printf("Unknown type for key: %s\n", key)
-		}
-
-		return true // continue parsing
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to parse RDB: %w", err)
-	}
-
-	return nil
+	return store.LoadRDB(filename)
 }
 
 // parseRESP reads the incoming data from the client and parses it into a RESP array.
